@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Tetris WA Bot</title>
+    <style>
+        * { box-sizing: border-box; touch-action: manipulation; }
+        body {
+            background-color: #12181f;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+            margin: 0;
+            padding: 10px;
+        }
+        h2 { margin: 5px 0 10px 0; color: #00e676; font-size: 20px; }
+        
+        .stats-bar {
+            display: flex;
+            justify-content: space-around;
+            width: 280px;
+            background: #1e2630;
+            padding: 8px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+        .stats-item span { display: block; font-weight: bold; font-size: 16px; color: #00e676; }
+
+        #tetris {
+            background: #0d1117;
+            border: 2px solid #28323e;
+            border-radius: 6px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        /* Tombol Kontrol HP */
+        .controls {
+            width: 280px;
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .row { display: flex; gap: 6px; justify-content: center; }
+        .btn {
+            background: #1e2630;
+            color: #fff;
+            border: 1px solid #28323e;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            flex: 1;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .btn:active { background: #00e676; color: #12181f; }
+        .btn-drop { background: #28323e; color: #00e676; }
+
+        /* Pop-up Modal Hasil / Kode Klaim */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            justify-content: center;
+            align-items: center;
+            z-index: 99;
+        }
+        .modal-content {
+            background: #1e2630;
+            border: 1px solid #00e676;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            width: 85%;
+            max-width: 320px;
+        }
+        .code-box {
+            background: #0d1117;
+            border: 1px dashed #00e676;
+            padding: 10px;
+            margin: 12px 0;
+            border-radius: 6px;
+        }
+        .code-text { font-size: 24px; color: #00e676; font-weight: bold; letter-spacing: 2px; }
+        .btn-restart { background: #00e676; color: #12181f; width: 100%; border: none; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h2>Tetris Game</h2>
+
+    <div class="stats-bar">
+        <div class="stats-item">SKOR<span id="score">0</span></div>
+        <div class="stats-item">BARIS<span id="lines">0</span></div>
+        <div class="stats-item">LEVEL<span id="level">1</span></div>
+    </div>
+
+    <canvas id="tetris" width="240" height="400"></canvas>
+
+    <!-- Kontrol Tombol HP -->
+    <div class="controls">
+        <div class="row">
+            <div class="btn" onclick="moveLeft()">←</div>
+            <div class="btn" onclick="rotate()">↻</div>
+            <div class="btn" onclick="moveRight()">→</div>
+            <div class="btn" onclick="drop()">↓</div>
+        </div>
+        <div class="row">
+            <div class="btn btn-drop" onclick="hardDrop()">JATUHKAN</div>
+        </div>
+    </div>
+
+    <!-- Modal Pop-up Kode Klaim -->
+    <div class="modal" id="claimModal">
+        <div class="modal-content">
+            <h3 style="margin-top:0; color:#00e676;">Target tercapai!</h3>
+            <p id="finalStats" style="font-size: 14px; color:#ccc;"></p>
+            
+            <div class="code-box">
+                <small style="color:#aaa;">KODE KLAIM</small>
+                <div class="code-text" id="claimCode">------</div>
+            </div>
+
+            <p style="font-size: 12px; color: #aaa;">Kirim <b style="color:#fff;" id="claimCmd">.klaimtetris KODE</b> ke chat buat menukar skor.</p>
+            <button class="btn btn-restart" onclick="restartGame()">Main lagi</button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('tetris');
+    const context = canvas.getContext('2d');
+    context.scale(20, 20);
+
+    const COLORS = [
+        null, '#FF0055', '#FF9900', '#FFCC00', '#00E676', '#00B0FF', '#9C27B0', '#E91E63'
+    ];
+
+    const SHAPES = [
+        [],
+        [[1, 1, 1, 1]], 
+        [[2, 0, 0], [2, 2, 2]], 
+        [[0, 0, 3], [3, 3, 3]], 
+        [[4, 4], [4, 4]], 
+        [[0, 5, 5], [5, 5, 0]], 
+        [[0, 6, 0], [6, 6, 6]], 
+        [[7, 7, 0], [0, 7, 7]]  
+    ];
+
+    const arena = createMatrix(12, 20);
+    const player = { pos: {x: 0, y: 0}, matrix: null, score: 0, lines: 0, level: 1 };
+    let dropCounter = 0;
+    let dropInterval = 800;
+    let lastTime = 0;
+    let isGameOver = false;
+
+    function createMatrix(w, h) {
+        const matrix = [];
+        while (h--) matrix.push(new Array(w).fill(0));
+        return matrix;
+    }
+
+    function collide(arena, player) {
+        const [m, o] = [player.matrix, player.pos];
+        for (let y = 0; y < m.length; ++y) {
+            for (let x = 0; x < m[y].length; ++x) {
+                if (m[y][x] !== 0 && (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    function merge(arena, player) {
+        player.matrix.forEach((row, y) => {
+            row.forEach((value, x) => {
+                if (value !== 0) arena[y + player.pos.y][x + player.pos.x] = value;
+            });
+        });
+    }
+
+    function arenaSweep() {
+        let rowCount = 1;
+        outer: for (let y = arena.length - 1; y >= 0; --y) {
+            for (let x = 0; x < arena[y].length; ++x) {
+                if (arena[y][x] === 0) continue outer;
+            }
+            const row = arena.splice(y, 1)[0].fill(0);
+            arena.unshift(row);
+            ++y;
+            player.score += rowCount * 100;
+            player.lines += 1;
+            rowCount *= 2;
+        }
+        updateScore();
+    }
+
+    function draw() {
+        context.fillStyle = '#0d1117';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        drawMatrix(arena, {x: 0, y: 0});
+        drawMatrix(player.matrix, player.pos);
+    }
+
+    function drawMatrix(matrix, offset) {
+        matrix.forEach((row, y) => {
+            row.forEach((value, x) => {
+                if (value !== 0) {
+                    context.fillStyle = COLORS[value];
+                    context.fillRect(x + offset.x, y + offset.y, 1, 1);
+                    context.strokeStyle = '#12181f';
+                    context.lineWidth = 0.05;
+                    context.strokeRect(x + offset.x, y + offset.y, 1, 1);
+                }
+            });
+        });
+    }
+
+    function playerDrop() {
+        player.pos.y++;
+        if (collide(arena, player)) {
+            player.pos.y--;
+            merge(arena, player);
+            playerReset();
+            arenaSweep();
+        }
+        dropCounter = 0;
+    }
+
+    function hardDrop() {
+        if (isGameOver) return;
+        while (!collide(arena, player)) {
+            player.pos.y++;
+        }
+        player.pos.y--;
+        merge(arena, player);
+        playerReset();
+        arenaSweep();
+        dropCounter = 0;
+    }
+
+    function moveLeft() {
+        if (isGameOver) return;
+        player.pos.x--;
+        if (collide(arena, player)) player.pos.x++;
+    }
+
+    function moveRight() {
+        if (isGameOver) return;
+        player.pos.x++;
+        if (collide(arena, player)) player.pos.x--;
+    }
+
+    function rotate() {
+        if (isGameOver) return;
+        const pos = player.pos.x;
+        let offset = 1;
+        const m = player.matrix;
+        for (let y = 0; y < m.length; ++y) {
+            for (let x = 0; x < y; ++x) {
+                [m[x][y], m[y][x]] = [m[y][x], m[x][y]];
+            }
+        }
+        m.forEach(row => row.reverse());
+        while (collide(arena, player)) {
+            player.pos.x += offset;
+            offset = -(offset + (offset > 0 ? 1 : -1));
+            if (offset > m[0].length) {
+                rotate(m);
+                player.pos.x = pos;
+                return;
+            }
+        }
+    }
+
+    function drop() {
+        if (isGameOver) return;
+        playerDrop();
+    }
+
+    function playerReset() {
+        const pieces = '1234567';
+        player.matrix = SHAPES[pieces[pieces.length * Math.random() | 0]];
+        player.pos.y = 0;
+        player.pos.x = (arena[0].length / 2 | 0) - (player.matrix[0].length / 2 | 0);
+        
+        if (collide(arena, player)) {
+            gameOver();
+        }
+    }
+
+    function updateScore() {
+        document.getElementById('score').innerText = player.score;
+        document.getElementById('lines').innerText = player.lines;
+    }
+
+    async function gameOver() {
+        isGameOver = true;
+        
+        try {
+            const res = await fetch('/api/save-score', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ score: player.score, lines: player.lines })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                document.getElementById('finalStats').innerText = `Skor akhir ${player.score} dari ${player.lines} baris.`;
+                document.getElementById('claimCode').innerText = data.code;
+                document.getElementById('claimCmd').innerText = `.klaimtetris ${data.code}`;
+                document.getElementById('claimModal').style.display = 'flex';
+            }
+        } catch (e) {
+            alert('Gagal menyimpan skor!');
+        }
+    }
+
+    function restartGame() {
+        arena.forEach(row => row.fill(0));
+        player.score = 0;
+        player.lines = 0;
+        isGameOver = false;
+        document.getElementById('claimModal').style.display = 'none';
+        updateScore();
+        playerReset();
+        update();
+    }
+
+    function update(time = 0) {
+        if (isGameOver) return;
+        const deltaTime = time - lastTime;
+        lastTime = time;
+
+        dropCounter += deltaTime;
+        if (dropCounter > dropInterval) {
+            playerDrop();
+        }
+
+        draw();
+        requestAnimationFrame(update);
+    }
+
+    playerReset();
+    update();
+</script>
+</body>
+</html>
